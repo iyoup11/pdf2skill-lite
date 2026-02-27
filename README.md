@@ -38,6 +38,24 @@ Web supports:
 - `name/lang/maxChunks/minScore` configuration
 - One-click compile and ZIP download
 
+### Security env vars (recommended)
+
+- `COMPILE_TOKEN`: enable API token auth for `/api/compile`
+- `MAX_UPLOAD_MB`: max single file upload size (default `100`)
+- `OUTPUT_TTL_HOURS`: auto cleanup old artifacts in `web-output` (default `24`)
+
+Example:
+
+```bash
+COMPILE_TOKEN=change-me MAX_UPLOAD_MB=50 OUTPUT_TTL_HOURS=12 npm run web
+```
+
+When token is set, call API with header:
+
+```txt
+x-compile-token: <COMPILE_TOKEN>
+```
+
 ## Free Platform Deploy
 
 ### Render
@@ -45,6 +63,13 @@ Web supports:
 - This repo already includes `Dockerfile` and `render.yaml`.
 - Push to GitHub, then create Render Web Service from the repo.
 - Render will build and run automatically.
+
+Recommended Render env vars:
+
+- `PORT=3789`
+- `COMPILE_TOKEN=<strong-random-token>`
+- `MAX_UPLOAD_MB=50`
+- `OUTPUT_TTL_HOURS=12`
 
 ## Usage
 

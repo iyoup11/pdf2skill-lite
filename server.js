@@ -6,6 +6,11 @@ const { execFile } = require("child_process");
 
 const app = express();
 const PORT = Number.parseInt(process.env.PORT || "3789", 10);
+const COMPILE_TOKEN = (process.env.COMPILE_TOKEN || "").trim();
+const OUTPUT_TTL_HOURS = Number.parseInt(process.env.OUTPUT_TTL_HOURS || "24", 10);
+const MAX_UPLOAD_MB = Number.parseInt(process.env.MAX_UPLOAD_MB || "100", 10);
+
+app.disable("x-powered-by");
 
 const uploadDir = path.join(__dirname, "tmp-uploads");
 const outDir = path.join(__dirname, "web-output");
@@ -17,7 +22,7 @@ fs.mkdirSync(outDir, { recursive: true });
 const upload = multer({
   dest: uploadDir,
   limits: {
-    fileSize: 1024 * 1024 * 100,
+    fileSize: 1024 * 1024 * MAX_UPLOAD_MB,
     files: 10,
   },
 });
@@ -55,18 +60,77 @@ function runCompile(args) {
   });
 }
 
+function cleanupOldOutputs(rootDir, ttlHours) {
+  const ttlMs = Math.max(1, ttlHours) * 60 * 60 * 1000;
+  const now = Date.now();
+
+  for (const entry of fs.readdirSync(rootDir, { withFileTypes: true })) {
+    const fullPath = path.join(rootDir, entry.name);
+    try {
+      const stat = fs.statSync(fullPath);
+      if (now - stat.mtimeMs <= ttlMs) {
+        continue;
+      }
+      if (entry.isDirectory()) {
+        fs.rmSync(fullPath, { recursive: true, force: true });
+      } else {
+        fs.unlinkSync(fullPath);
+      }
+    } catch (_) {
+      // Ignore cleanup failures.
+    }
+  }
+}
+
+function isPdfFile(file) {
+  const name = String(file.originalname || "").toLowerCase();
+  const mime = String(file.mimetype || "").toLowerCase();
+  return name.endsWith(".pdf") && mime.includes("pdf");
+}
+
+function authGuard(req, res, next) {
+  if (!COMPILE_TOKEN) {
+    next();
+    return;
+  }
+
+  const candidate = String(req.headers["x-compile-token"] || req.query.token || "").trim();
+  if (!candidate || candidate !== COMPILE_TOKEN) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  next();
+}
+
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/")) {
+    res.setHeader("Cache-Control", "no-store");
+  }
+  next();
+});
+
 app.use(express.static(webDir));
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-app.post("/api/compile", upload.array("pdfs", 10), async (req, res) => {
+app.post("/api/compile", authGuard, upload.array("pdfs", 10), async (req, res) => {
   const files = req.files || [];
+
+  cleanupOldOutputs(outDir, OUTPUT_TTL_HOURS);
 
   if (files.length === 0) {
     res.status(400).json({ error: "Please upload at least one PDF file." });
     return;
+  }
+
+  for (const file of files) {
+    if (!isPdfFile(file)) {
+      cleanupUploaded(files);
+      res.status(400).json({ error: `Invalid file type: ${file.originalname}. Only PDF is allowed.` });
+      return;
+    }
   }
 
   const rawName = req.body.name || "pdf-skill-pack";
