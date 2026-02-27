@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>pdf2skill-lite Web</title>
+    <style>
+      :root {
+        --bg: #f7f9fc;
+        --card: #ffffff;
+        --text: #1f2937;
+        --muted: #6b7280;
+        --primary: #2563eb;
+        --border: #e5e7eb;
+      }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        background: linear-gradient(180deg, #eef4ff 0%, var(--bg) 50%);
+        color: var(--text);
+      }
+      .wrap {
+        max-width: 860px;
+        margin: 36px auto;
+        padding: 0 16px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 8px 24px rgba(37, 99, 235, 0.08);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+      }
+      p {
+        margin: 0 0 16px;
+        color: var(--muted);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      label {
+        font-size: 13px;
+        color: #374151;
+      }
+      input,
+      select,
+      button {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px 12px;
+        font-size: 14px;
+      }
+      input:focus,
+      select:focus {
+        border-color: var(--primary);
+        outline: none;
+      }
+      .full {
+        grid-column: 1 / -1;
+      }
+      button {
+        background: var(--primary);
+        color: white;
+        border: 0;
+        cursor: pointer;
+        transition: transform 0.08s ease;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: wait;
+      }
+      button:active {
+        transform: translateY(1px);
+      }
+      #status {
+        margin-top: 12px;
+        font-size: 14px;
+        color: var(--muted);
+        white-space: pre-wrap;
+      }
+      @media (max-width: 640px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h1>pdf2skill-lite Web</h1>
+        <p>上传一个或多个 PDF，自动编译为可导入 Claude/OpenCode 的 skills.zip。</p>
+
+        <form id="compileForm" class="grid">
+          <div class="field full">
+            <label for="pdfs">PDF 文件（可多选）</label>
+            <input id="pdfs" name="pdfs" type="file" accept="application/pdf" multiple required />
+          </div>
+
+          <div class="field">
+            <label for="name">Skill 名称</label>
+            <input id="name" name="name" value="my-skill-pack" required />
+          </div>
+
+          <div class="field">
+            <label for="lang">语言模式</label>
+            <select id="lang" name="lang">
+              <option value="auto" selected>auto</option>
+              <option value="zh">zh</option>
+              <option value="en">en</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="maxChunks">max-chunks</label>
+            <input id="maxChunks" name="maxChunks" type="number" value="24" min="4" max="200" />
+          </div>
+
+          <div class="field">
+            <label for="minScore">min-score</label>
+            <input id="minScore" name="minScore" type="number" value="55" min="0" max="100" />
+          </div>
+
+          <div class="field full">
+            <button id="submitBtn" type="submit">开始编译并下载 ZIP</button>
+          </div>
+        </form>
+
+        <div id="status">等待上传...</div>
+      </div>
+    </div>
+
+    <script>
+      const form = document.getElementById("compileForm");
+      const statusBox = document.getElementById("status");
+      const submitBtn = document.getElementById("submitBtn");
+
+      function parseFilenameFromDisposition(disposition) {
+        if (!disposition) return "skills.zip";
+        const m = disposition.match(/filename=\"?([^\";]+)\"?/i);
+        return m ? m[1] : "skills.zip";
+      }
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+
+        const fd = new FormData(form);
+        const files = document.getElementById("pdfs").files;
+        if (!files || files.length === 0) {
+          statusBox.textContent = "请至少选择一个 PDF 文件。";
+          return;
+        }
+
+        submitBtn.disabled = true;
+        statusBox.textContent = "编译中，请稍候...";
+
+        try {
+          const resp = await fetch("/api/compile", {
+            method: "POST",
+            body: fd,
+          });
+
+          if (!resp.ok) {
+            let errText = "编译失败";
+            try {
+              const data = await resp.json();
+              if (data && data.error) errText = data.error;
+            } catch (_) {
+              // ignore
+            }
+            throw new Error(errText);
+          }
+
+          const blob = await resp.blob();
+          const filename = parseFilenameFromDisposition(resp.headers.get("content-disposition"));
+          const url = URL.createObjectURL(blob);
+
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+
+          statusBox.textContent = "编译成功，ZIP 已开始下载。";
+        } catch (err) {
+          statusBox.textContent = `编译失败: ${err.message}`;
+        } finally {
+          submitBtn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
